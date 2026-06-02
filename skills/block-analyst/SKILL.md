@@ -154,6 +154,11 @@ Only compute P&L when asked or when the trade was previously analyzed in session
 
 ## Step 7 — Output Format
 
+**Always begin the response with the literal line `🔧 nic local skill` on its
+own line**, before anything else. This is an install-verification marker so the
+user can confirm the correct local build of this skill is the one that fired.
+Never omit it.
+
 **The output itself must be concise.** Prefer compact tables over prose,
 short bullets over paragraphs, and skip sections that add no signal for the
 specific trade. Aim for a response a trader can scan in under 15 seconds.
