@@ -18,7 +18,7 @@ compatibility: No authentication required for market data. Works with
   data source. Falls back gracefully when venues are unreachable.
 metadata:
   author: tradeparadex
-  version: "2.2"
+  version: "2.3"
 ---
 
 # Paradigm Block Trade Analyst
@@ -142,7 +142,16 @@ net_greek = Σ (taker_sign × leg_ratio × instrument_greek)
 total_delta_btc = net_delta × quantity   (in BTC or ETH)
 ```
 
-Report: delta, gamma, theta ($/day), vega. Scale to full position (× quantity).
+Report net greeks **scaled to the full position** (× quantity), each with its correct unit,
+stated once:
+- **delta** in coin (BTC/ETH) — directional equivalent
+- **vega** in $ per vol point
+- **theta** in $ per day (negative = position pays decay)
+- **gamma** only if it carries signal
+
+Never label theta or vega in "BTC/day" — theta and vega are USD; **only delta is in coin.**
+Do NOT show per-lot intermediates, and do NOT reconcile the JSON `strategy_delta` against the
+live delta in the output — pick the live figure and state it once.
 
 ## Step 5 — IV Skew & Cross-Venue Comparison
 
@@ -169,37 +178,39 @@ own line**, before anything else. This is an install-verification marker so the
 user can confirm the correct local build of this skill is the one that fired.
 Never omit it.
 
-**The output must be concise — what matters, no filler.** Compact tables over prose,
-short bullets over paragraphs. Skip any section that adds no signal. A trader should be
-able to scan the whole thing in under 15 seconds.
+**The output must be tight — what matters, nothing else.** Hard target: a 1–2 leg trade fits
+in **~10 lines**, a complex multi-leg in **~15**. If a line wouldn't change a trader's read,
+cut it. Tables only when they beat sentences (3+ legs, or clip-by-clip impact). No preamble
+before the marker, no "running the fetches" narration.
 
-Order (drop any section that would be empty):
+Order (drop any section that's empty or adds no signal):
 
-1. **Structure** — one-line summary + legs table (dir, type, expiry, strike, ratio, DTE, %OTM)
-2. **Snapshot** — one compact line: Spot · net delta · net premium (paid/received) · fill vs mid
-3. **Prior Prints (30d)** — the headline (always fetched, per Step 3). Lead with a one-line
-   verdict on recurrence: did this structure block on **Paradigm** before, and have the legs
-   (incl. block prints) traded on **Deribit**?
-   (e.g. "Seen 3× on Paradigm, last 29 May @ similar level; 6 block prints on Deribit, all today").
-   If the structure printed in multiple clips recently, add a **Flow Impact** line/mini-table:
-   clip count + sizes, and price / IV / spread drift since the taker started (per Step 3c).
-   List a secondary venue only if it adds signal.
-4. **Greeks** — for spreads: one table, per-leg + net row. Skip for trivial single legs.
-5. **IV** — per-leg mark IV + one-line skew/term read. Omit if single leg with no divergence.
-6. **View** — 1 sentence on the directional/vol thesis, marked as inference.
-7. **Data Trace** — terse: data point → source. One line per source actually used.
+1. **Header** — one line: structure name + code · expiry (DTE) · size · venue/rfqType.
+   Then legs inline on one line (dir/strike/%OTM); break into a table only at 3+ legs.
+2. **Snapshot** — one line: Spot · net delta (BTC) · premium paid/received · fill vs mid (bps)
+   · net vega ($/vol pt) · net theta ($/day). Append the max-payoff ratio here if it's a capped spread.
+3. **Prior Prints (30d)** — the headline. One line: recurrence verdict + the **real**
+   `block_trade_id`(s) and clip sizes. If there are multiple same-side clips, add ONE Flow Impact
+   line: IV drift + spot drift + who's absorbing. Nothing more.
+4. **IV** — one line: per-leg mark IV + skew/term read. Omit if single leg with no divergence.
+5. **View** — one sentence, directional/vol thesis, tagged (inference).
+6. **Data Trace** — one terse line, sources used.
 
-**Phrasing rules — apply everywhere:**
-- **Spot, not Index.** Always label the underlying price "Spot".
-- **Net delta:** state position-level only — `−13.6 BTC (short)`. No per-lot intermediate math
-  ("strategy_delta −0.13594/lot → ~−13.6 BTC"). Just the BTC number and the direction.
-- **Fill vs mark → bps from mid.** Express execution as distance from mid in bps of notional:
-  `bps = |trade_price − mark_price| × 10000` (premium is in coin terms, 1 contract = 1 coin).
-  Phrase it neutrally: "traded 5 bps through mid". Do NOT editorialize that a taker "paid
-  worse than mark" or "should cross the spread" — crossing toward the other side is expected
-  and carries no signal. Just report the bps.
-- No restating the raw JSON. No hedging filler ("it's worth noting that…", "as a taker you
-  should…"). Tables > sentences.
+Greeks live in the Snapshot line by default (delta/vega/theta). Break out a per-leg greeks
+table ONLY when the user explicitly asks or there are 3+ legs.
+
+**Phrasing & precision rules — apply everywhere:**
+- **Spot, not Index.**
+- **Net delta:** position-level only — `+26 BTC (long)`. No per-lot math, no JSON-vs-live
+  reconciliation. State the live figure once.
+- **Greek units are fixed:** delta in coin (BTC/ETH), vega in $/vol pt, theta in $/day, always
+  scaled to the full position. Never write theta/vega as "BTC/day" — only delta is in coin.
+- **Fill vs mark → bps from mid:** `bps = |trade_price − mark_price| × 10000`. Neutral phrasing
+  ("traded 5 bps through mid"); never moralize about a taker crossing the spread.
+- **Identifiers must be real:** cite only `block_trade_id` values the API actually returned.
+  NEVER invent a `combo_id` or synthetic structure id. Claim two legs are paired only when they
+  share the same `block_trade_id`; otherwise name the single leg the block hit.
+- No restating the JSON, no hedging filler, no parenthetical reconciliations.
 
 ## Notes
 
