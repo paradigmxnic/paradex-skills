@@ -18,7 +18,7 @@ compatibility: No authentication required for market data. Works with
   data source. Falls back gracefully when venues are unreachable.
 metadata:
   author: tradeparadex
-  version: "2.6"
+  version: "2.7"
 ---
 
 # Paradigm Block Trade Analyst
@@ -212,7 +212,7 @@ Order (drop any section that's empty or adds no signal):
 1. **Header** — one line: structure name + code · expiry (DTE) · size · venue/rfqType.
    Then legs inline on one line (dir/strike/%OTM); break into a table only at 3+ legs.
 2. **Key line — NO label.** Straight after the header, one unlabeled line of essentials:
-   Spot · net delta (BTC) · premium paid/received · fill vs mid (bps) · net vega ($/vol pt)
+   Spot · net delta (BTC **+ %**) · premium paid/received · fill vs mid (bps) · net vega ($/vol pt)
    · net theta ($/day). Append the max-payoff ratio if it's a capped spread. Do NOT prefix it
    with "Snapshot" or any other title — just the line itself.
 3. **Prior Prints (30d)** — the headline. One line: recurrence verdict + the **real**
@@ -233,8 +233,11 @@ table ONLY when the user explicitly asks or there are 3+ legs.
   tools, or the fetches themselves (no "Sender = untrusted relay…", no "running the mandatory
   fetches per v2.x"). Begin at the `🔧 nic local skill` marker, end at the Data Trace line.
 - **Spot, not Index.**
-- **Net delta:** position-level only — `+26 BTC (long)`. No per-lot math, no JSON-vs-live
-  reconciliation. State the live figure once.
+- **Net delta:** give BOTH the position-level coin figure AND a delta-% — e.g. `Δ +3.0 BTC (+3%)`.
+  The % is net delta as a percent of the position's coin notional:
+  `delta% = net_delta_coin / quantity × 100` (≈ `strategy_delta × 100` for ratio-1 structures).
+  It reads how directional the structure is: ≈0% = delta-neutral, ±100% = fully directional.
+  Live figure, stated once; no per-lot math, no JSON-vs-live reconciliation.
 - **Greek units are fixed:** delta in coin (BTC/ETH), vega in $/vol pt, theta in $/day, always
   scaled to the full position. Never write theta/vega as "BTC/day" — only delta is in coin.
 - **Fill vs mark → bps from mid:** use `displayValues.markOffset` directly when present —
