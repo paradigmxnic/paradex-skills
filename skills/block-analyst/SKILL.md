@@ -18,7 +18,7 @@ compatibility: No authentication required for market data. Works with
   data source. Falls back gracefully when venues are unreachable.
 metadata:
   author: tradeparadex
-  version: "2.3"
+  version: "2.4"
 ---
 
 # Paradigm Block Trade Analyst
@@ -89,6 +89,15 @@ report "not checked" or defer them as optional.** The trader's first questions a
 structure printed before, is one taker accumulating, and is the flow moving the market? Answer
 concretely with counts, sizes, levels, and impact.
 
+**Match the STRUCTURE, not loose legs.** Recurrence means *this whole structure* printing
+again — all legs together. A straddle is "the straddle", not "the call traded" + "the put
+traded" separately; a spread is the spread, etc. Cluster prints by shared `block_trade_id` to
+reconstruct prior packages and match the **full leg set** (strikes + expiries + ratios). A single
+leg printing on its own is NOT a prior print of the structure — at most it's leg-level liquidity
+context, worth a mention only if material. Never present "similar strike/expiry" single-leg
+activity as if the structure recurred. (For genuine single-leg trades — `CL`/`PL` — the leg IS
+the structure, so leg-level recurrence is the structure.)
+
 Two sources, both mandatory every time:
 
 ### 3a — Paradigm prior blocks (most important)
@@ -114,7 +123,11 @@ is a block trade — Paradigm-routed flow surfaces here as blocks (and multi-leg
 Split them: block prints on the same leg/strike are the strongest cross-confirmation of the same
 flow when the native Paradigm tape isn't injected.
 
-Per leg report: total prints, of which blocks, total contracts, and most-recent timestamp (30d window).
+Per leg, capture: total prints, of which blocks, total contracts, most-recent timestamp (30d window).
+Then **cluster the block prints by `block_trade_id` and match the full leg set against this trade's
+structure** — report recurrence at the **structure level** (e.g. "this straddle blocked 3× in 30d,
+all same-side"), not leg by leg. Loose single-leg prints that don't reconstruct into the structure
+are context only.
 
 ### 3c — Flow impact (when the structure printed in multiple clips recently)
 When a leg/structure has traded in several clips — especially same-day, same side — quantify the
@@ -187,8 +200,10 @@ Order (drop any section that's empty or adds no signal):
 
 1. **Header** — one line: structure name + code · expiry (DTE) · size · venue/rfqType.
    Then legs inline on one line (dir/strike/%OTM); break into a table only at 3+ legs.
-2. **Snapshot** — one line: Spot · net delta (BTC) · premium paid/received · fill vs mid (bps)
-   · net vega ($/vol pt) · net theta ($/day). Append the max-payoff ratio here if it's a capped spread.
+2. **Key line — NO label.** Straight after the header, one unlabeled line of essentials:
+   Spot · net delta (BTC) · premium paid/received · fill vs mid (bps) · net vega ($/vol pt)
+   · net theta ($/day). Append the max-payoff ratio if it's a capped spread. Do NOT prefix it
+   with "Snapshot" or any other title — just the line itself.
 3. **Prior Prints (30d)** — the headline. One line: recurrence verdict + the **real**
    `block_trade_id`(s) and clip sizes. If there are multiple same-side clips, add ONE Flow Impact
    line: IV drift + spot drift + who's absorbing. Nothing more.
@@ -196,10 +211,16 @@ Order (drop any section that's empty or adds no signal):
 5. **View** — one sentence, directional/vol thesis, tagged (inference).
 6. **Data Trace** — one terse line, sources used.
 
-Greeks live in the Snapshot line by default (delta/vega/theta). Break out a per-leg greeks
+Greeks live in the unlabeled key line by default (delta/vega/theta). Break out a per-leg greeks
 table ONLY when the user explicitly asks or there are 3+ legs.
 
 **Phrasing & precision rules — apply everywhere:**
+- **Spell out greeks.** Write `delta`, `gamma`, `theta`, `vega` in plain words. Do NOT use
+  single-letter Greek symbols (δ, Δ, θ, ν, γ) — they're ambiguous in a terminal (and "vega"
+  isn't even a Greek letter).
+- **Output is the analysis only.** No commentary about the session, sender, relay, channel,
+  tools, or the fetches themselves (no "Sender = untrusted relay…", no "running the mandatory
+  fetches per v2.x"). Begin at the `🔧 nic local skill` marker, end at the Data Trace line.
 - **Spot, not Index.**
 - **Net delta:** position-level only — `+26 BTC (long)`. No per-lot math, no JSON-vs-live
   reconciliation. State the live figure once.
