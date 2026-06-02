@@ -18,7 +18,7 @@ compatibility: No authentication required for market data. Works with
   data source. Falls back gracefully when venues are unreachable.
 metadata:
   author: tradeparadex
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Paradigm Block Trade Analyst
@@ -44,7 +44,7 @@ Extract from the JSON:
 | `price` | Fill price (in `quote_currency` units) |
 | `mark_price` | Deribit mark at trade time |
 | `displayValues.markOffset` | Fill vs mark: +/- premium |
-| `index_price` | Spot at trade time |
+| `index_price` | Spot at trade time. **Label this "Spot" in the output, never "Index".** |
 | `strategy_code` | Structure type (see references/strategy-codes.md) |
 | `rfqType` | `grfq` (multi-maker) or `drfq` (directed) |
 | `venue` | `DBT` = Deribit, `BIT` = Bit.com, `OKX` = OKX |
@@ -82,11 +82,21 @@ Follow Bybit skill Module Router: load `modules/market.md`, then call
 Bybit frequently does not list short-dated (<3 DTE) or illiquid strikes —
 empty list is an expected result, not an error.
 
-## Step 3 — Cross-Venue Tape History (last 90 days)
+## Step 3 — Prior Prints: Has This Structure Traded Before? (last 90 days)
 
-Query all reachable venues in parallel. For each venue, check whether the structure's
-legs have traded within the last 90 days. See `references/venues.md` for endpoints,
-instrument naming, and known limitations per venue.
+**This is the highest-value part of the analysis.** The first thing a trader wants to
+know about a block is "has this same structure printed recently, and where?" Answer that
+first and clearly, before greeks or view.
+
+Priority — always attempt these two:
+1. **Paradigm** — has this exact structure (same `strategy_code` + matching legs) blocked
+   before? This is the strongest signal: a recurring block points to a programmatic seller/buyer.
+2. **Deribit** — have the individual legs traded on-screen in the last 90 days, and how active?
+
+Only check secondary venues (OKX, Paradex, Bullish, IBIT) when they add real signal. Do NOT
+pad the output with "not listed" rows for venues that never list the instrument.
+
+See `references/venues.md` for endpoints, instrument naming, and known limitations per venue.
 
 **Paradigm (primary — structured block view):**
 Search the injected Paradigm block-trade tape for prior fills with the same
@@ -159,27 +169,34 @@ own line**, before anything else. This is an install-verification marker so the
 user can confirm the correct local build of this skill is the one that fired.
 Never omit it.
 
-**The output itself must be concise.** Prefer compact tables over prose,
-short bullets over paragraphs, and skip sections that add no signal for the
-specific trade. Aim for a response a trader can scan in under 15 seconds.
+**The output must be concise — what matters, no filler.** Compact tables over prose,
+short bullets over paragraphs. Skip any section that adds no signal. A trader should be
+able to scan the whole thing in under 15 seconds.
 
-Structure:
+Order (drop any section that would be empty):
 
-1. **Structure** — one-line summary + legs table (direction, type, expiry, strike, ratio)
-2. **Market Context** — spot, moneyness per leg, DTE — one line each
-3. **Live Greeks** — single table: per-leg + net position row
-4. **IV** — per-leg mark IV, cross-venue spread (omit if no divergence), one-line skew read
-5. **Cross-Venue History (90d)** — compact table with one row per venue: leg trades found,
-   last seen date, short note. Paradigm row shows block count; other venues show leg-trade
-   count. Use "—" for unreachable/not-listed venues. Omit table entirely only if all venues
-   are unavailable.
-6. **View** — 1–2 sentences on directional/vol thesis, marked as inference
-7. **Sizing** — notional, premium paid/received, mark offset, execution quality — one line
-8. **Data Trace** — terse list: data point → source. Include one line per venue queried
-   in Step 3 (e.g. "Deribit leg history → web_fetch public trades API", "Bullish → not listed")
+1. **Structure** — one-line summary + legs table (dir, type, expiry, strike, ratio, DTE, %OTM)
+2. **Snapshot** — one compact line: Spot · net delta · net premium (paid/received) · fill vs mid
+3. **Prior Prints (90d)** — the headline. Did this structure trade on **Paradigm** before, and
+   have the legs traded on **Deribit**? Lead with a one-line verdict
+   (e.g. "Seen 3× on Paradigm, last 29 May @ similar level; both legs active on Deribit").
+   List a secondary venue only if it adds signal.
+4. **Greeks** — for spreads: one table, per-leg + net row. Skip for trivial single legs.
+5. **IV** — per-leg mark IV + one-line skew/term read. Omit if single leg with no divergence.
+6. **View** — 1 sentence on the directional/vol thesis, marked as inference.
+7. **Data Trace** — terse: data point → source. One line per source actually used.
 
-Drop any section that would be empty or pure boilerplate. No restating of the
-raw JSON. No hedging filler ("it's worth noting that…"). Tables > sentences.
+**Phrasing rules — apply everywhere:**
+- **Spot, not Index.** Always label the underlying price "Spot".
+- **Net delta:** state position-level only — `−13.6 BTC (short)`. No per-lot intermediate math
+  ("strategy_delta −0.13594/lot → ~−13.6 BTC"). Just the BTC number and the direction.
+- **Fill vs mark → bps from mid.** Express execution as distance from mid in bps of notional:
+  `bps = |trade_price − mark_price| × 10000` (premium is in coin terms, 1 contract = 1 coin).
+  Phrase it neutrally: "traded 5 bps through mid". Do NOT editorialize that a taker "paid
+  worse than mark" or "should cross the spread" — crossing toward the other side is expected
+  and carries no signal. Just report the bps.
+- No restating the raw JSON. No hedging filler ("it's worth noting that…", "as a taker you
+  should…"). Tables > sentences.
 
 ## Notes
 
