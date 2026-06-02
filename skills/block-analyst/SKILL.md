@@ -18,7 +18,7 @@ compatibility: No authentication required for market data. Works with
   data source. Falls back gracefully when venues are unreachable.
 metadata:
   author: tradeparadex
-  version: "2.7"
+  version: "2.8"
 ---
 
 # Paradigm Block Trade Analyst
@@ -63,8 +63,9 @@ The taker's real position comes from the **leg-level `side` fields** plus the si
 - The **top-level `side`/`action`** is the RFQ-quote-direction convention and can CONTRADICT the
   legs. Example: top-level `SELL` with both legs `BUY` and `strategy_delta` > 0 is a **long**
   straddle — taker is long vol, NOT short. When they disagree, trust the leg sides +
-  `strategy_delta`, and state the long/short-vol read **inline in the header** — never as a
-  trailing footnote.
+  `strategy_delta`. Resolve this **silently** and put only the plain conclusion in the header
+  ("long straddle"). NEVER show the reasoning in the output — no "top-level SELL is
+  quote-convention", no BUY/SELL leg mechanics. That logic is internal; the reader sees the verdict.
 - Single-leg `description` is just the instrument name; for multi-leg, parse legs from the `legs`
   array (or `description`: `[+/-][ratio] [Type] [DD Mon YY] [Strike]`, one per line).
 
@@ -140,12 +141,19 @@ are context only.
 ### 3c — Flow impact (when the structure printed in multiple clips recently)
 When a leg/structure has traded in several clips — especially same-day, same side — quantify the
 accumulation footprint (this is what matters when one taker is working an order):
-- **Clips:** number of fills and size of each (or total + size range).
-- **Price impact:** how the leg's traded price and the underlying moved from first clip to latest
-  (e.g. "6 clips, 20–50x, mark +14% and spot +1.1% as the taker lifted").
-- **Vol & spread:** change in `mark_iv` and bid/ask width across the clips — is the taker paying up
-  and widening the screen, or getting absorbed quietly? Pull the current ticker (`mark_iv`,
-  `best_bid_price`/`best_ask_price`) and compare against the clip prices/times to read the impact.
+Show this clip-by-clip (a small table is fine here), and for **every clip include the traded
+vol and the spread** — that is the signal Nic cares about most:
+- **Clips:** each fill's time, size, and price.
+- **Traded vol (IV):** the IV each clip printed at — use the `iv` field Deribit returns on each
+  trade in `get_last_trades_by_instrument`. Show it per clip so vol drift is visible.
+- **Spread:** the bid/ask width around each clip. Where historical quotes aren't in the trade
+  feed, use the current ticker `best_bid_price`/`best_ask_price` for the live spread and compare
+  to where the clips printed. Report spread in the premium's own unit (and/or bps).
+- **The read:** state explicitly whether **vol and spread are widening or tightening** across the
+  clips as the taker works the order — widening vol/spread = paying up / liquidity thinning /
+  market makers backing away; flat = absorbed quietly. Also note price and spot drift.
+  (e.g. "5 clips 20–40x, IV 46.7 → 48.5 and screen widening 0.5→1.2 vol — taker lifting through,
+  MMs pulling back".)
 
 Keep the *output* of this tight (one or two lines / a small table) — the depth is in the analysis,
 not the word count.
@@ -209,15 +217,20 @@ before the marker, no "running the fetches" narration.
 
 Order (drop any section that's empty or adds no signal):
 
-1. **Header** — one line: structure name + code · expiry (DTE) · size · venue/rfqType.
+1. **Header** — one line: plain structure name · expiry (DTE) · size · venue/rfqType, then the
+   plain long/short-vol read. Use the readable name only — **`Straddle`, not `Straddle (SD)`**;
+   never print the raw `strategy_code` (SD/CS/CL/RR…). State direction plainly ("long straddle",
+   "short risk reversal") with **no explanation of the side/quote convention** — no "top-level
+   SELL is quote-convention", no leg-side mechanics. Just the conclusion.
    Then legs inline on one line (dir/strike/%OTM); break into a table only at 3+ legs.
 2. **Key line — NO label.** Straight after the header, one unlabeled line of essentials:
    Spot · net delta (BTC **+ %**) · premium paid/received · fill vs mid (bps) · net vega ($/vol pt)
    · net theta ($/day). Append the max-payoff ratio if it's a capped spread. Do NOT prefix it
    with "Snapshot" or any other title — just the line itself.
-3. **Prior Prints (30d)** — the headline. One line: recurrence verdict + the **real**
-   `block_trade_id`(s) and clip sizes. If there are multiple same-side clips, add ONE Flow Impact
-   line: IV drift + spot drift + who's absorbing. Nothing more.
+3. **Prior Prints (30d)** — the headline. Recurrence verdict + the **real** `block_trade_id`(s).
+   If multiple same-side clips, show them clip-by-clip with **size · price · traded vol (IV) ·
+   spread** per clip, then a one-line read on whether **vol and spread are widening or tightening**
+   as the taker works it (+ spot drift). The vol/spread trend is the key signal — never omit it.
 4. **IV** — one line: per-leg mark IV + skew/term read. Omit if single leg with no divergence.
 5. **View** — one sentence, directional/vol thesis, tagged (inference).
 6. **Data Trace** — one terse line, sources used.
