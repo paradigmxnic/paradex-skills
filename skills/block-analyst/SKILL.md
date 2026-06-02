@@ -18,7 +18,7 @@ compatibility: No authentication required for market data. Works with
   data source. Falls back gracefully when venues are unreachable.
 metadata:
   author: tradeparadex
-  version: "2.1"
+  version: "2.2"
 ---
 
 # Paradigm Block Trade Analyst
@@ -82,56 +82,56 @@ Follow Bybit skill Module Router: load `modules/market.md`, then call
 Bybit frequently does not list short-dated (<3 DTE) or illiquid strikes —
 empty list is an expected result, not an error.
 
-## Step 3 — Prior Prints: Has This Structure Traded Before? (last 90 days)
+## Step 3 — Prior Prints & Flow Impact (last 30 days)
 
-**This is the highest-value part of the analysis.** The first thing a trader wants to
-know about a block is "has this same structure printed recently, and where?" Answer that
-first and clearly, before greeks or view.
+**This is the highest-value part of the analysis. ALWAYS run the fetches below — never
+report "not checked" or defer them as optional.** The trader's first questions are: has this
+structure printed before, is one taker accumulating, and is the flow moving the market? Answer
+concretely with counts, sizes, levels, and impact.
 
-Priority — always attempt these two:
-1. **Paradigm** — has this exact structure (same `strategy_code` + matching legs) blocked
-   before? This is the strongest signal: a recurring block points to a programmatic seller/buyer.
-2. **Deribit** — have the individual legs traded on-screen in the last 90 days, and how active?
+Two sources, both mandatory every time:
 
-Only check secondary venues (OKX, Paradex, Bullish, IBIT) when they add real signal. Do NOT
-pad the output with "not listed" rows for venues that never list the instrument.
+### 3a — Paradigm prior blocks (most important)
+Block recurrence on Paradigm is the strongest signal — a repeating block means a programmatic
+or conviction taker, not random flow.
+- **If a Paradigm block tape is injected** into the session (via a block-trade context tool or
+  equivalent feed): scan it for prior blocks matching this structure — same `strategy_code` +
+  same leg geometry (underlying, expiry pattern, strike/width or moneyness) within 30d. Report:
+  count of matching blocks, size range, most recent (date + level + side), and whether one-sided
+  (single taker building) or two-way.
+- **If no Paradigm tape is injected** (e.g. running outside the Dime terminal): say so in one
+  line and fall back to identifying Paradigm-routed prints on the Deribit tape (see 3b). Never
+  fabricate block counts.
 
-See `references/venues.md` for endpoints, instrument naming, and known limitations per venue.
+### 3b — Deribit tape, always fetch (public, no auth)
+Per leg:
+`web_fetch GET /api/v2/public/get_last_trades_by_instrument?instrument_name=<leg>&count=1000&start_timestamp=<now_ms − 30d>&end_timestamp=<now_ms>&sorting=desc`
+(fall back to `count=100&sorting=desc` if the windowed pull returns nothing).
 
-**Paradigm (primary — structured block view):**
-Search the injected Paradigm block-trade tape for prior fills with the same
-`strategy_code` and matching leg structure — same underlying, same expiry pattern,
-and same strike geometry (absolute strikes for short-dated, or moneyness/width for
-longer-dated).
+**Identify Paradigm / block prints on the tape:** each trade carrying a `block_trade_id` field
+is a block trade — Paradigm-routed flow surfaces here as blocks (and multi-leg blocks share one
+`block_trade_id` with `block_trade_leg_count` > 1). Trades with no `block_trade_id` are on-screen.
+Split them: block prints on the same leg/strike are the strongest cross-confirmation of the same
+flow when the native Paradigm tape isn't injected.
 
-Capture: count of matching blocks, rough notional range, most recent occurrence
-(date + fill vs mark), recurring vs one-off read, same-side concentration if
-directionally meaningful.
+Per leg report: total prints, of which blocks, total contracts, and most-recent timestamp (30d window).
 
-**Paradex:**
-Call `paradex_trades` MCP per leg instrument. Count trades within the 90-day window.
-For perp legs query `BTC-USD-PERP` / `ETH-USD-PERP`. If the instrument is not listed,
-record "not listed".
+### 3c — Flow impact (when the structure printed in multiple clips recently)
+When a leg/structure has traded in several clips — especially same-day, same side — quantify the
+accumulation footprint (this is what matters when one taker is working an order):
+- **Clips:** number of fills and size of each (or total + size range).
+- **Price impact:** how the leg's traded price and the underlying moved from first clip to latest
+  (e.g. "6 clips, 20–50x, mark +14% and spot +1.1% as the taker lifted").
+- **Vol & spread:** change in `mark_iv` and bid/ask width across the clips — is the taker paying up
+  and widening the screen, or getting absorbed quietly? Pull the current ticker (`mark_iv`,
+  `best_bid_price`/`best_ask_price`) and compare against the clip prices/times to read the impact.
 
-**Deribit:**
-`web_fetch GET /api/v2/public/get_last_trades_by_instrument?instrument_name=<leg>&count=100&sorting=desc`
-per leg. Filter results to the 90-day window. Count trades and capture most recent timestamp.
+Keep the *output* of this tight (one or two lines / a small table) — the depth is in the analysis,
+not the word count.
 
-**OKX:**
-`web_fetch GET /api/v5/market/trades?instId=<leg>&limit=100` per leg.
-Count trades and capture most recent timestamp.
-
-**Bullish:**
-`web_fetch GET https://api.exchange.bullish.com/trading-api/v1/trades?symbol=<symbol>&limit=100`
-per leg. If instrument not listed, record "not listed on Bullish".
-
-**IBIT:**
-`web_fetch` on the IBIT public API (resolve endpoint at runtime). If unreachable,
-record "IBIT unavailable". If the user means BlackRock IBIT ETF options (CBOE equity
-options), note the distinction — those are not directly comparable to crypto structures.
-
-**Fallback:** If no venue returns any data, record "all venue tape history unavailable"
-in the data trace and skip the history section — do not fabricate counts.
+### Secondary venues (optional)
+Only when they add real signal — OKX (`/api/v5/market/trades`), Paradex (`paradex_trades` MCP for
+perp legs). Do NOT pad the output with "not listed" rows for venues that never list the instrument.
 
 ## Step 4 — Compute Net Greeks
 
@@ -177,9 +177,12 @@ Order (drop any section that would be empty):
 
 1. **Structure** — one-line summary + legs table (dir, type, expiry, strike, ratio, DTE, %OTM)
 2. **Snapshot** — one compact line: Spot · net delta · net premium (paid/received) · fill vs mid
-3. **Prior Prints (90d)** — the headline. Did this structure trade on **Paradigm** before, and
-   have the legs traded on **Deribit**? Lead with a one-line verdict
-   (e.g. "Seen 3× on Paradigm, last 29 May @ similar level; both legs active on Deribit").
+3. **Prior Prints (30d)** — the headline (always fetched, per Step 3). Lead with a one-line
+   verdict on recurrence: did this structure block on **Paradigm** before, and have the legs
+   (incl. block prints) traded on **Deribit**?
+   (e.g. "Seen 3× on Paradigm, last 29 May @ similar level; 6 block prints on Deribit, all today").
+   If the structure printed in multiple clips recently, add a **Flow Impact** line/mini-table:
+   clip count + sizes, and price / IV / spread drift since the taker started (per Step 3c).
    List a secondary venue only if it adds signal.
 4. **Greeks** — for spreads: one table, per-leg + net row. Skip for trivial single legs.
 5. **IV** — per-leg mark IV + one-line skew/term read. Omit if single leg with no divergence.
