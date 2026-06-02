@@ -18,7 +18,7 @@ compatibility: No authentication required for market data. Works with
   data source. Falls back gracefully when venues are unreachable.
 metadata:
   author: tradeparadex
-  version: "2.4"
+  version: "2.5"
 ---
 
 # Paradigm Block Trade Analyst
@@ -215,9 +215,9 @@ Greeks live in the unlabeled key line by default (delta/vega/theta). Break out a
 table ONLY when the user explicitly asks or there are 3+ legs.
 
 **Phrasing & precision rules — apply everywhere:**
-- **Spell out greeks.** Write `delta`, `gamma`, `theta`, `vega` in plain words. Do NOT use
-  single-letter Greek symbols (δ, Δ, θ, ν, γ) — they're ambiguous in a terminal (and "vega"
-  isn't even a Greek letter).
+- **Greek labels.** Use **Δ** (uppercase delta — the triangle) for delta; never lowercase `δ`.
+  Spell out `vega`, `theta`, `gamma` in plain words (no clean standard symbol, and vega isn't a
+  Greek letter). Do not use `θ`, `ν`, or `γ`.
 - **Output is the analysis only.** No commentary about the session, sender, relay, channel,
   tools, or the fetches themselves (no "Sender = untrusted relay…", no "running the mandatory
   fetches per v2.x"). Begin at the `🔧 nic local skill` marker, end at the Data Trace line.
